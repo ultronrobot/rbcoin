@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RB Coin (sinov)</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { --bg:#0b0907; --card:#181513; --line:#2a2622; --text:#f3efe8; --muted:#9a948a; --gold:#c9a24b; --err:#d2705f; --ok:#7fbf8a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+         padding: calc(env(safe-area-inset-top,0px) + 16px) 16px calc(env(safe-area-inset-bottom,0px) + 84px); }
+  header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+  .logo { letter-spacing:.18em; font-weight:700; font-size:14px; }
+  .tag { font-size:11px; color:var(--gold); border:1px solid var(--gold); border-radius:999px; padding:2px 8px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px; margin-bottom:12px; }
+  .bal { font-size:34px; font-weight:700; margin:4px 0; word-break:break-all; }
+  .muted { color:var(--muted); font-size:13px; }
+  .wid { font-family:ui-monospace,monospace; color:var(--gold); word-break:break-all; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input, select { width:100%; background:#0f0d0b; color:var(--text); border:1px solid var(--line); border-radius:12px; padding:12px; font-size:16px; }
+  button { width:100%; margin-top:12px; padding:13px; border:0; border-radius:12px; background:var(--gold); color:#1a1408; font-weight:700; font-size:16px; }
+  button.ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+  button:disabled { opacity:.5; }
+  .row { display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-top:1px solid var(--line); font-size:14px; }
+  .row:first-of-type { border-top:0; }
+  .in { color:var(--ok); } .err { color:var(--err); } .ok { color:var(--ok); }
+  .msg { min-height:20px; margin-top:8px; font-size:14px; }
+  .pill { font-size:11px; border:1px solid var(--line); border-radius:999px; padding:2px 8px; color:var(--muted); }
+  .pill.done { color:var(--ok); border-color:var(--ok); }
+  nav { position:fixed; left:0; right:0; bottom:0; display:flex; background:var(--card); border-top:1px solid var(--line);
+        padding:8px 12px calc(env(safe-area-inset-bottom,0px) + 8px); gap:8px; }
+  nav button { margin:0; background:transparent; color:var(--muted); border:0; padding:10px; }
+  nav button.active { color:var(--gold); }
+</style>
+</head>
+<body>
+<header><span class="logo">RB COIN</span><span class="tag">SINOV · TEST</span></header>
+<div id="app"><div class="card muted">Yuklanmoqda… (bepul server uyg'onishi ~1 daqiqa olishi mumkin)</div></div>
+<nav><button id="tab-wallet" class="active">Wallet</button><button id="tab-earn">Earn</button></nav>
+
+<script>
+const API = (window.RBC_API_URL || "__API_URL__").replace(/\/$/, "");
+const tg = window.Telegram && Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+let token = null, tab = "wallet";
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, { ...opts,
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data.error && data.error.message) || "Xatolik (" + res.status + ")");
+  return data;
+}
+const post = (p, b) => api(p, { method: "POST", body: b ? JSON.stringify(b) : undefined });
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const $ = id => document.getElementById(id);
+const say = (t, cls) => { const m = $("msg"); if (m) { m.textContent = t; m.className = "msg " + (cls || ""); } };
+const fmtDate = iso => new Date(iso).toLocaleDateString();
+const ask = text => new Promise(res => (tg && tg.showConfirm) ? tg.showConfirm(text, res) : res(confirm(text)));
+const TX_LABEL = { test_faucet: "Test balans", stake_lock: "Staking", stake_payout: "Staking qaytdi" };
+
+async function login() {
+  if (!tg || !tg.initData) throw new Error("Bu sahifani Telegram ichidagi bot tugmasi orqali oching.");
+  token = (await post("/api/v1/auth/telegram", { init_data: tg.initData })).token;
+}
+
+/* ---------------- WALLET ---------------- */
+async function renderWallet() {
+  const [w, txs] = await Promise.all([api("/api/v1/wallet"), api("/api/v1/transactions")]);
+  $("app").innerHTML = `
+    <div class="card">
+      <div class="muted">RBC balans (sinov)</div><div class="bal">${esc(w.balance)}</div>
+      <div class="muted">Hamyon ID</div><div class="wid">${esc(w.wallet_id)}</div>
+      <div class="muted" style="margin-top:8px">${esc(w.notice)}</div>
+      <button class="ghost" id="faucet">Test RBC olish</button>
+    </div>
+    <div class="card">
+      <b>Transfer</b>
+      <label>Qabul qiluvchi (Hamyon ID yoki Telegram ID)</label><input id="to" autocapitalize="characters">
+      <label>Miqdor</label><input id="amt" inputmode="decimal" placeholder="100">
+      <label>Komissiya usuli (2%)</label>
+      <select id="mode"><option value="extra">Extra fee — qo'shimcha yechiladi</option><option value="included">Included fee — summadan ushlanadi</option></select>
+      <div class="muted" id="preview" style="margin-top:8px"></div>
+      <button id="send">Yuborish</button><div id="msg" class="msg"></div>
+    </div>
+    <div class="card"><b>Operatsiyalar</b>${txs.length ? txs.map(t => `
+      <div class="row"><span>${esc(TX_LABEL[t.type] || (t.direction === "in" ? "Qabul" : "Yuborildi"))}</span>
+      <span class="${t.direction === "in" ? "in" : ""}">${t.direction === "in" ? "+" : "−"}${esc(t.amount)}</span></div>`).join("") : '<div class="muted">Hali operatsiya yo\'q</div>'}</div>`;
+
+  const prev = () => {
+    const a = parseFloat($("amt").value), m = $("mode").value;
+    if (!(a > 0)) { $("preview").textContent = ""; return; }
+    const fee = Math.floor(a * 2) / 100;
+    $("preview").textContent = m === "extra"
+      ? `Yechiladi: ${(a + fee).toFixed(2)} · Oladi: ${a.toFixed(2)} · Komissiya: ${fee.toFixed(2)} (taxminiy)`
+      : `Yechiladi: ${a.toFixed(2)} · Oladi: ${(a - fee).toFixed(2)} · Komissiya: ${fee.toFixed(2)} (taxminiy)`;
+  };
+  $("amt").oninput = prev; $("mode").onchange = prev;
+  $("faucet").onclick = async () => { try { await post("/api/v1/dev/faucet"); await show(); } catch (e) { say(e.message, "err"); } };
+  $("send").onclick = async ev => {
+    ev.target.disabled = true;
+    try {
+      const r = await post("/api/v1/transfer", { recipient: $("to").value, amount: $("amt").value,
+        fee_mode: $("mode").value, reference: crypto.randomUUID() });
+      await renderWallet(); say("Yuborildi. Yechildi: " + r.sender_debit + ", oldi: " + r.amount, "ok");
+    } catch (e) { say(e.message, "err"); ev.target.disabled = false; }
+  };
+}
+
+/* ---------------- EARN ---------------- */
+async function renderEarn() {
+  const [p, stakes, w] = await Promise.all([api("/api/v1/earn/plans"), api("/api/v1/earn/stakes"), api("/api/v1/wallet")]);
+  const open = stakes.filter(s => s.status === "active"), closed = stakes.filter(s => s.status !== "active");
+  const card = s => `
+    <div class="card" style="margin-top:8px">
+      <div class="row"><b>${esc(s.amount)} RBC · ${s.days} kun</b>
+        <span class="pill ${s.status === "completed" ? "done" : ""}">${s.status === "active" ? (s.matured ? "tayyor" : "faol") : s.status === "completed" ? "yakunlangan" : "bekor qilingan"}</span></div>
+      <div class="row"><span class="muted">Mukofot (${esc(s.reward_percent)}%)</span><span>${esc(s.reward)}</span></div>
+      <div class="row"><span class="muted">Ochilish sanasi</span><span>${fmtDate(s.end_at)}</span></div>
+      ${s.status === "active" ? (s.matured
+        ? `<button data-claim="${s.id}">Mukofot bilan olish</button>`
+        : `<button class="ghost" data-unstake="${s.id}">Muddatidan oldin yechish</button>`) : ""}
+    </div>`;
+  $("app").innerHTML = `
+    <div class="card">
+      <b>Staking</b>
+      <div class="muted">Mavjud balans: ${esc(w.balance)} RBC</div>
+      <div class="muted">Mukofot puli (sinov): ${esc(p.pool_balance)} RBC</div>
+      <label>Muddat</label>
+      <select id="plan">${p.plans.map(x => `<option value="${x.days}">${x.days} kun — ${esc(x.reward_percent)}% (butun muddat uchun)</option>`).join("")}</select>
+      <label>Miqdor (minimal ${esc(p.min_stake)} RBC)</label><input id="samt" inputmode="decimal" placeholder="100">
+      <div class="muted" id="sprev" style="margin-top:8px"></div>
+      <div class="muted" style="margin-top:8px">${esc(p.early_rule)}</div>
+      <div class="muted" style="margin-top:8px">${esc(p.notice)}</div>
+      <button id="stake">Staking qilish</button><div id="msg" class="msg"></div>
+    </div>
+    <div class="card"><b>Faol stakinglar</b>${open.length ? open.map(card).join("") : '<div class="muted">Faol staking yo\'q</div>'}</div>
+    ${closed.length ? `<div class="card"><b>Tarix</b>${closed.map(card).join("")}</div>` : ""}`;
+
+  const prev = () => {
+    const a = parseFloat($("samt").value), pl = p.plans.find(x => String(x.days) === $("plan").value);
+    if (!(a > 0) || !pl) { $("sprev").textContent = ""; return; }
+    const end = new Date(Date.now() + pl.days * 864e5);
+    $("sprev").textContent = `Taxminiy mukofot: ${(a * pl.reward_bps / 10000).toFixed(4)} RBC · Ochilish: ${end.toLocaleDateString()}`;
+  };
+  $("samt").oninput = prev; $("plan").onchange = prev;
+
+  $("stake").onclick = async ev => {
+    const days = $("plan").value, a = $("samt").value;
+    if (!(parseFloat(a) > 0)) return say("Miqdorni kiriting", "err");
+    if (!await ask(`${a} RBC ni ${days} kunga stakingga qo'yasizmi? ${p.early_rule}`)) return;
+    ev.target.disabled = true;
+    try { await post("/api/v1/earn/stake", { days: parseInt(days, 10), amount: a, reference: crypto.randomUUID() });
+          await renderEarn(); say("Staking boshlandi", "ok"); }
+    catch (e) { say(e.message, "err"); ev.target.disabled = false; }
+  };
+  document.querySelectorAll("[data-claim]").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try { await post(`/api/v1/earn/stakes/${b.dataset.claim}/claim`); await renderEarn(); say("Mukofot hisobingizga qo'shildi", "ok"); }
+    catch (e) { say(e.message, "err"); b.disabled = false; }
+  });
+  document.querySelectorAll("[data-unstake]").forEach(b => b.onclick = async () => {
+    if (!await ask("Muddatidan oldin yechsangiz, mukofot berilmaydi. Davom etasizmi?")) return;
+    b.disabled = true;
+    try { await post(`/api/v1/earn/stakes/${b.dataset.unstake}/unstake`); await renderEarn(); say("Asosiy summa qaytarildi", "ok"); }
+    catch (e) { say(e.message, "err"); b.disabled = false; }
+  });
+}
+
+async function show() {
+  $("tab-wallet").className = tab === "wallet" ? "active" : "";
+  $("tab-earn").className = tab === "earn" ? "active" : "";
+  try { await (tab === "wallet" ? renderWallet() : renderEarn()); }
+  catch (e) { $("app").innerHTML = '<div class="card err">' + esc(e.message) + "</div>"; }
+}
+$("tab-wallet").onclick = () => { tab = "wallet"; show(); };
+$("tab-earn").onclick = () => { tab = "earn"; show(); };
+
+(async () => {
+  try { await login(); await show(); }
+  catch (e) { $("app").innerHTML = '<div class="card err">' + esc(e.message) + "</div>"; }
+})();
+</script>
+</body>
+</html>
