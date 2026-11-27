@@ -443,3 +443,9 @@ async def telegram_webhook(request: Request,
                                                        "web_app": {"url": config.WEBAPP_URL}}]]},
             })
     return {"ok": True}
+
+try:
+    import staking  # noqa: F401
+except Exception:
+    logging.getLogger("rbcoin").exception("staking yuklanmadi")
+  
